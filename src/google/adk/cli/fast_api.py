@@ -87,10 +87,16 @@ from .utils import envs
 from .utils import evals
 from .utils.agent_loader import AgentLoader
 
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
 logger = logging.getLogger("google_adk." + __name__)
 
 _EVAL_SET_FILE_EXTENSION = ".evalset.json"
 
+class AgentChangeEventHandler(FileSystemEventHandler):
+  def on_modified(self, event):
+    logger.info("File changed: %s", event.src_path)
 
 class ApiServerSpanExporter(export.SpanExporter):
 
@@ -207,6 +213,12 @@ def get_fast_api_app(
     trace_to_cloud: bool = False,
     lifespan: Optional[Lifespan[FastAPI]] = None,
 ) -> FastAPI:
+  # Set up a file system watcher to detect changes in the agents directory.
+  event_handler = AgentChangeEventHandler()
+  observer = Observer()
+  observer.schedule(event_handler, agents_dir, recursive=True)
+  observer.start()
+
   # InMemory tracing dict.
   trace_dict: dict[str, Any] = {}
   session_trace_dict: dict[str, Any] = {}
@@ -235,7 +247,6 @@ def get_fast_api_app(
 
   @asynccontextmanager
   async def internal_lifespan(app: FastAPI):
-
     try:
       if lifespan:
         async with lifespan(app) as lifespan_context:
@@ -243,6 +254,8 @@ def get_fast_api_app(
       else:
         yield
     finally:
+      observer.stop()
+      observer.join()
       # Create tasks for all runner closures to run concurrently
       await cleanup.close_runners(list(runner_dict.values()))
 

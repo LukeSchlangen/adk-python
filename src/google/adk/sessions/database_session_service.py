@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime
+from datetime import timezone
 import json
 import logging
 from typing import Any
@@ -131,9 +132,13 @@ class StorageSession(Base):
       MutableDict.as_mutable(DynamicJSON), default={}
   )
 
-  create_time: Mapped[DateTime] = mapped_column(DateTime(), default=func.now())
+  create_time: Mapped[DateTime] = mapped_column(
+      DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+  )
   update_time: Mapped[DateTime] = mapped_column(
-      DateTime(), default=func.now(), onupdate=func.now()
+      DateTime(timezone=True),
+      default=lambda: datetime.now(timezone.utc),
+      onupdate=lambda: datetime.now(timezone.utc),
   )
 
   storage_events: Mapped[list["StorageEvent"]] = relationship(
@@ -227,7 +232,7 @@ class StorageEvent(Base):
         session_id=session.id,
         app_name=session.app_name,
         user_id=session.user_id,
-        timestamp=datetime.fromtimestamp(event.timestamp),
+        timestamp=datetime.fromtimestamp(event.timestamp, tz=timezone.utc),
         long_running_tool_ids=event.long_running_tool_ids,
         partial=event.partial,
         turn_complete=event.turn_complete,
@@ -412,7 +417,9 @@ class DatabaseSessionService(BaseSessionService):
           user_id=str(storage_session.user_id),
           id=str(storage_session.id),
           state=merged_state,
-          last_update_time=storage_session.update_time.timestamp(),
+          last_update_time=storage_session.update_time.replace(
+              tzinfo=timezone.utc
+          ).timestamp(),
       )
       return session
 
@@ -473,7 +480,9 @@ class DatabaseSessionService(BaseSessionService):
           user_id=user_id,
           id=session_id,
           state=merged_state,
-          last_update_time=storage_session.update_time.timestamp(),
+          last_update_time=storage_session.update_time.replace(
+              tzinfo=timezone.utc
+          ).timestamp(),
       )
       session.events = [e.to_event() for e in reversed(storage_events)]
     return session
@@ -496,7 +505,9 @@ class DatabaseSessionService(BaseSessionService):
             user_id=user_id,
             id=storage_session.id,
             state={},
-            last_update_time=storage_session.update_time.timestamp(),
+            last_update_time=storage_session.update_time.replace(
+                tzinfo=timezone.utc
+            ).timestamp(),
         )
         sessions.append(session)
       return ListSessionsResponse(sessions=sessions)
@@ -577,7 +588,9 @@ class DatabaseSessionService(BaseSessionService):
       session_factory.refresh(storage_session)
 
       # Update timestamp with commit time
-      session.last_update_time = storage_session.update_time.timestamp()
+      session.last_update_time = storage_session.update_time.replace(
+          tzinfo=timezone.utc
+      ).timestamp()
 
     # Also update the in-memory session
     await super().append_event(session=session, event=event)

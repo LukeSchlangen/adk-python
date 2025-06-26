@@ -102,7 +102,21 @@ class PreciseTimestamp(TypeDecorator):
   def load_dialect_impl(self, dialect):
     if dialect.name == "mysql":
       return dialect.type_descriptor(mysql.DATETIME(fsp=6))
+    if dialect.name == "sqlite":
+      return dialect.type_descriptor(String)
     return self.impl
+
+  def process_bind_param(self, value, dialect):
+    if dialect.name == "sqlite" and value is not None:
+      if isinstance(value, str):
+          return value
+      return value.astimezone(get_localzone()).isoformat()
+    return value
+
+  def process_result_value(self, value, dialect):
+      if dialect.name == "sqlite" and value is not None:
+          return datetime.fromisoformat(value)
+      return value
 
 
 class Base(DeclarativeBase):
